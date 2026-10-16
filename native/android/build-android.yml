@@ -1,0 +1,52 @@
+# Copy this existing template to .github/workflows/build-android.yml on GitHub.
+# Manual build only. No production secrets, Play upload, deployment or publishing.
+name: Build Android AAB
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: native/android
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+          cache-disabled: true
+      - name: Compile phone test and release variants
+        run: gradle :app:assembleDebug :app:bundleDebug :app:bundleRelease --no-daemon --stacktrace --console=plain
+      - name: Downloadable phone test
+        uses: actions/upload-artifact@v4
+        with:
+          name: arielux-phone-test
+          path: |
+            native/android/app/build/outputs/apk/debug/*.apk
+            native/android/app/build/outputs/bundle/debug/*.aab
+          if-no-files-found: error
+          retention-days: 1
+      - name: Record build result
+        if: always()
+        run: |
+          echo "## Arielux Android build: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "On success, download arielux-phone-test, unzip it on the phone and install the APK." >> "$GITHUB_STEP_SUMMARY"
+          echo "Debug APK and AAB use Android test signing only; neither is a Play release." >> "$GITHUB_STEP_SUMMARY"
+          echo "Release variant is compiled without production signing; it is not uploaded." >> "$GITHUB_STEP_SUMMARY"
+          echo "No Play listing, customer record, website or backend was changed by this build." >> "$GITHUB_STEP_SUMMARY"
