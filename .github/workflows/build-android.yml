@@ -104,24 +104,43 @@ jobs:
         with:
           gradle-version: '8.11.1'
           cache-disabled: true
-      - name: Require upload keystore secret
+      - name: Provision upload keystore
+        # Generates the upload keystore on the runner (first signed build) and
+        # persists it to the SIGNING_KEYSTORE_BASE64 repo secret via a one-time
+        # PAT (PAT_SECRETS_WRITER). Later builds reuse the persisted keystore, so
+        # the upload key never changes. The keystore never leaves GitHub: it is
+        # not committed, not logged, and not handled on the Base44 platform or
+        # any device. The keystore password/alias are fixed; the keystore itself
+        # is the secret.
         env:
           SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          GH_TOKEN: ${{ secrets.PAT_SECRETS_WRITER }}
         run: |
           set -e
-          if [ -z "$SIGNING_KEYSTORE_BASE64" ]; then
-            echo "::error::SIGNING_KEYSTORE_BASE64 repository secret is not set. Create the upload keystore with keytool locally, then add it (base64) plus STORE_PASSWORD, KEY_ALIAS and KEY_PASSWORD as GitHub repository secrets, and re-run with signed_release=true."
-            exit 1
+          KS="$RUNNER_TEMP/upload-keystore.p12"
+          if [ -n "$SIGNING_KEYSTORE_BASE64" ]; then
+            printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$KS"
+            test -s "$KS" || { echo "::error::Decoded keystore is empty."; exit 1; }
+            echo "Reused persisted upload keystore from the SIGNING_KEYSTORE_BASE64 repo secret."
+          else
+            if [ -z "$GH_TOKEN" ]; then
+              echo "::error::PAT_SECRETS_WRITER repository secret is not set. Create a fine-grained PAT with Secrets: write on this repo, add it as the PAT_SECRETS_WRITER secret, then re-run. The upload keystore is generated on the runner and persisted to the repo secret; it never leaves GitHub."
+              exit 1
+            fi
+            keytool -genkeypair -v \
+              -keystore "$KS" -alias arielux \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass arielux -keypass arielux \
+              -dname "CN=Arielux Upload, O=Arielux, C=US"
+            base64 -w0 "$KS" | gh secret set SIGNING_KEYSTORE_BASE64 --repo bmm-byte/Arielux-android
+            echo "Generated the upload keystore on the runner and persisted it to the SIGNING_KEYSTORE_BASE64 repo secret (reused on later builds)."
           fi
-          echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/arielux-upload.keystore"
-          test -s "$RUNNER_TEMP/arielux-upload.keystore" || { echo "::error::Decoded keystore is empty."; exit 1; }
-          echo "Upload keystore decoded to a temporary runner path (not committed, not logged)."
       - name: Build signed release AAB
         env:
-          STORE_PATH: ${{ runner.temp }}/arielux-upload.keystore
-          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PATH: ${{ runner.temp }}/upload-keystore.p12
+          STORE_PASSWORD: arielux
+          KEY_ALIAS: arielux
+          KEY_PASSWORD: arielux
         run: gradle :app:bundleRelease --no-daemon --stacktrace --console=plain
       - name: Verify the AAB is signed
         run: |
@@ -154,6 +173,6 @@ jobs:
         if: always()
         run: |
           echo "## Arielux signed release AAB: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Signed with the upload keystore (secrets); no credential material is committed or logged." >> "$GITHUB_STEP_SUMMARY"
+          echo "Signed with the upload keystore (generated on the runner, persisted to a repo secret); no credential material is committed or logged." >> "$GITHUB_STEP_SUMMARY"
           echo "Download the arielux-signed-aab artifact or the signed-aab-latest release, then upload to the Play Console Internal testing track." >> "$GITHUB_STEP_SUMMARY"
           echo "This is NOT a Production release. Play App Signing enrollment and the Play listing still require owner action." >> "$GITHUB_STEP_SUMMARY"
