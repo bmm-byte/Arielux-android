@@ -218,6 +218,7 @@ class PlayBillingInterface(
                         out.put(productJson(it)); detailsCache[it.productId] = it
                     }
                 }
+                Unit
             } catch (e: Exception) {
                 Log.w(tag, "getSkuDetails error: ${e.message}")
             }
