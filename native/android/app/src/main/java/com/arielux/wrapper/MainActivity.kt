@@ -33,7 +33,7 @@ class MainActivity : Activity() {
     // The ONLY origins the WebView may load. Update this single set if a custom
     // domain is connected later. The billing interface is injected only here.
     private val trustedOrigins = setOf(
-        "https://aura-your-muse.base44.app"
+        "https://arielux.base44.app"
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -87,7 +87,7 @@ class MainActivity : Activity() {
         setContentView(webView)
         requestRuntimePermissions()
         playBilling.start()
-        webView.loadUrl("https://aura-your-muse.base44.app")
+        webView.loadUrl("https://arielux.base44.app")
     }
 
     private fun configureWebSettings(s: WebSettings) {
