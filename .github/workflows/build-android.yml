@@ -25,14 +25,21 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Set up Android SDK (platform 36 + build-tools)
-        # The preinstalled runner SDK already has cmdline-tools 16.0; the
-        # legacy `tools` package the third-party action installs was removed,
-        # so install only what the compile step needs via the preinstalled
-        # sdkmanager. No paid services or extra toolchain download.
+        # The preinstalled runner SDK already has cmdline-tools; the legacy
+        # `tools` package the third-party action installs was removed, and
+        # sdkmanager is not on PATH, so call it by full path under
+        # $ANDROID_HOME/cmdline-tools. No paid services or extra download.
         run: |
           set -e
-          yes | sdkmanager --licenses > /dev/null
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n1)"
+          fi
+          test -x "$SDKMANAGER" || { echo "sdkmanager not found under $ANDROID_HOME"; exit 1; }
+          echo "Using sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
