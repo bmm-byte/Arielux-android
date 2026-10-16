@@ -1,9 +1,14 @@
 # Copy this existing template to .github/workflows/build-android.yml on GitHub.
-# Manual build only. No production secrets, Play upload, deployment or publishing.
+# Manual build only. No Play upload, deployment or publishing to Production.
 name: Build Android AAB
 
 on:
   workflow_dispatch:
+    inputs:
+      signed_release:
+        description: 'Build a signed release AAB (requires signing secrets)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,8 +29,22 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Set up Android SDK (platform 36 + build-tools)
+        # The preinstalled runner SDK already has cmdline-tools; the legacy
+        # `tools` package the third-party action installs was removed, and
+        # sdkmanager is not on PATH, so call it by full path under
+        # $ANDROID_HOME/cmdline-tools. No paid services or extra download.
+        run: |
+          set -e
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n1)"
+          fi
+          test -x "$SDKMANAGER" || { echo "sdkmanager not found under $ANDROID_HOME"; exit 1; }
+          echo "Using sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -48,5 +67,93 @@ jobs:
           echo "## Arielux Android build: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
           echo "On success, download arielux-phone-test, unzip it on the phone and install the APK." >> "$GITHUB_STEP_SUMMARY"
           echo "Debug APK and AAB use Android test signing only; neither is a Play release." >> "$GITHUB_STEP_SUMMARY"
-          echo "Release variant is compiled without production signing; it is not uploaded." >> "$GITHUB_STEP_SUMMARY"
           echo "No Play listing, customer record, website or backend was changed by this build." >> "$GITHUB_STEP_SUMMARY"
+
+  build-signed-aab:
+    if: ${{ github.event.inputs.signed_release == 'true' }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: native/android
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK (platform 36 + build-tools)
+        run: |
+          set -e
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n1)"
+          fi
+          test -x "$SDKMANAGER" || { echo "sdkmanager not found under $ANDROID_HOME"; exit 1; }
+          echo "Using sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+          cache-disabled: true
+      - name: Require upload keystore secret
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          set -e
+          if [ -z "$SIGNING_KEYSTORE_BASE64" ]; then
+            echo "::error::SIGNING_KEYSTORE_BASE64 repository secret is not set. Create the upload keystore with keytool locally, then add it (base64) plus STORE_PASSWORD, KEY_ALIAS and KEY_PASSWORD as GitHub repository secrets, and re-run with signed_release=true."
+            exit 1
+          fi
+          echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/arielux-upload.keystore"
+          test -s "$RUNNER_TEMP/arielux-upload.keystore" || { echo "::error::Decoded keystore is empty."; exit 1; }
+          echo "Upload keystore decoded to a temporary runner path (not committed, not logged)."
+      - name: Build signed release AAB
+        env:
+          STORE_PATH: ${{ runner.temp }}/arielux-upload.keystore
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: gradle :app:bundleRelease --no-daemon --stacktrace --console=plain
+      - name: Verify the AAB is signed
+        run: |
+          set -e
+          AAB="app/build/outputs/bundle/release/app-release.aab"
+          test -f "$AAB" || { echo "::error::Release AAB not found at $AAB"; exit 1; }
+          if jarsigner -verify "$AAB" 2>/dev/null; then
+            echo "Release AAB signature: verified (jarsigner)."
+          else
+            echo "::warning::jarsigner did not report a verified signature; the bundle may use a newer signing scheme. Confirm on Play Console upload."
+          fi
+          ls -l "$AAB"
+      - name: Upload signed release AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: arielux-signed-aab
+          path: native/android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish signed AAB to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          AAB="app/build/outputs/bundle/release/app-release.aab"
+          TAG="signed-aab-latest"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" "$AAB" --target main --title "Arielux signed release AAB" --notes "Signed release AAB built from commit ${{ github.sha }}. Upload to Google Play Console (Internal testing). NOT a Production release. Package id: com.arielux.android." --prerelease
+      - name: Record signed-release result
+        if: always()
+        run: |
+          echo "## Arielux signed release AAB: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Signed with the upload keystore (secrets); no credential material is committed or logged." >> "$GITHUB_STEP_SUMMARY"
+          echo "Download the arielux-signed-aab artifact or the signed-aab-latest release, then upload to the Play Console Internal testing track." >> "$GITHUB_STEP_SUMMARY"
+          echo "This is NOT a Production release. Play App Signing enrollment and the Play listing still require owner action." >> "$GITHUB_STEP_SUMMARY"
