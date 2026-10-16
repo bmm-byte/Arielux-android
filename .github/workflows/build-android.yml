@@ -24,8 +24,15 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Set up Android SDK (platform 36 + build-tools)
+        # The preinstalled runner SDK already has cmdline-tools 16.0; the
+        # legacy `tools` package the third-party action installs was removed,
+        # so install only what the compile step needs via the preinstalled
+        # sdkmanager. No paid services or extra toolchain download.
+        run: |
+          set -e
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
