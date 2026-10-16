@@ -208,11 +208,15 @@ class PlayBillingInterface(
                 ensureReady()
                 val subSkus = ids.filter { it.endsWith("_monthly") }
                 val inappSkus = ids.filterNot { it.endsWith("_monthly") }
-                if (subSkus.isNotEmpty()) queryProducts(subSkus, BillingClient.ProductType.SUBS).forEach {
-                    out.put(productJson(it)); detailsCache[it.productId] = it
+                if (subSkus.isNotEmpty()) {
+                    queryProducts(subSkus, BillingClient.ProductType.SUBS).forEach {
+                        out.put(productJson(it)); detailsCache[it.productId] = it
+                    }
                 }
-                if (inappSkus.isNotEmpty()) queryProducts(inappSkus, BillingClient.ProductType.INAPP).forEach {
-                    out.put(productJson(it)); detailsCache[it.productId] = it
+                if (inappSkus.isNotEmpty()) {
+                    queryProducts(inappSkus, BillingClient.ProductType.INAPP).forEach {
+                        out.put(productJson(it)); detailsCache[it.productId] = it
+                    }
                 }
             } catch (e: Exception) {
                 Log.w(tag, "getSkuDetails error: ${e.message}")
