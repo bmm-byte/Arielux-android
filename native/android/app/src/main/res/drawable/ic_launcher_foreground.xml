@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon foreground: the Arielux "A" monogram in the brand rose
+     accent, centered in the 72dp safe zone (66% of the 108dp canvas) so it is
+     never cropped by the round/square mask. Transparent around the mark so the
+     plum background shows through. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M32,80 L54,28 L76,80 M40,60 L68,60"
+        android:strokeColor="#f4a9d0"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>
