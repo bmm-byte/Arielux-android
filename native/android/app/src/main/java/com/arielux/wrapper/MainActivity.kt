@@ -14,6 +14,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.arielux.billing.PlayBillingInterface
+import com.arielux.sensors.SensorBridge
 
 /**
  * Host Activity for the Arielux web app. Loads the trusted HTTPS origin in a
@@ -29,6 +30,7 @@ class MainActivity : Activity() {
 
     private lateinit var webView: WebView
     private lateinit var playBilling: PlayBillingInterface
+    private lateinit var sensorBridge: SensorBridge
 
     // The ONLY origins the WebView may load. Update this single set if a custom
     // domain is connected later. The billing interface is injected only here.
@@ -43,15 +45,18 @@ class MainActivity : Activity() {
         configureWebSettings(webView.settings)
 
         playBilling = PlayBillingInterface(applicationContext) { this }
-        // Inject before load so the object exists when the web app boots.
+        sensorBridge = SensorBridge(applicationContext) { this }
+        // Inject before load so the objects exist when the web app boots.
         webView.addJavascriptInterface(playBilling, "PlayBilling")
+        webView.addJavascriptInterface(sensorBridge, "AndroidSensors")
 
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 if (!isTrusted(request?.url)) {
-                    // Off-origin navigation: strip the bridge so the page cannot
-                    // reach it, then block the load.
+                    // Off-origin navigation: strip the bridges so the page cannot
+                    // reach them, then block the load.
                     view?.removeJavascriptInterface("PlayBilling")
+                    view?.removeJavascriptInterface("AndroidSensors")
                     return true
                 }
                 return false
@@ -61,8 +66,10 @@ class MainActivity : Activity() {
                 if (isTrusted(url?.let { Uri.parse(it) })) {
                     // Re-add on return to the trusted origin.
                     view?.addJavascriptInterface(playBilling, "PlayBilling")
+                    view?.addJavascriptInterface(sensorBridge, "AndroidSensors")
                 } else {
                     view?.removeJavascriptInterface("PlayBilling")
+                    view?.removeJavascriptInterface("AndroidSensors")
                     view?.stopLoading()
                 }
             }
@@ -117,8 +124,14 @@ class MainActivity : Activity() {
         checkSelfPermission(perm) == PackageManager.PERMISSION_GRANTED
 
     private fun requestRuntimePermissions() {
-        val needed = listOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
-            .filterNot { hasPermission(it) }
+        val needed = listOf(
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.CAMERA,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.READ_PHONE_STATE
+        ).filterNot { hasPermission(it) }
         if (needed.isNotEmpty()) {
             requestPermissions(needed.toTypedArray(), RC_PERMS)
         }
